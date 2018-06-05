@@ -3,7 +3,7 @@
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.AppRouter = exports.PipelineProvider = exports.LoadRouteStep = exports.RouteLoader = exports.ActivateNextStep = exports.DeactivatePreviousStep = exports.CanActivateNextStep = exports.CanDeactivatePreviousStep = exports.Router = exports.BuildNavigationPlanStep = exports.activationStrategy = exports.RouterConfiguration = exports.RedirectToRoute = exports.Redirect = exports.NavModel = exports.NavigationInstruction = exports.CommitChangesStep = exports.Pipeline = exports.pipelineStatus = undefined;
+exports.AppRouter = exports.PipelineProvider = exports.LoadRouteStep = exports.RouteLoader = exports.ActivateNextStep = exports.DeactivatePreviousStep = exports.CanActivateNextStep = exports.CanDeactivatePreviousStep = exports.Router = exports.BuildNavigationPlanStep = exports.activationStrategy = exports.RouterConfiguration = exports.Pipeline = exports.pipelineStatus = exports.RedirectToRoute = exports.Redirect = exports.NavModel = exports.NavigationInstruction = exports.CommitChangesStep = undefined;
 
 var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) { return typeof obj; } : function (obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; };
 
@@ -12,6 +12,7 @@ var _createClass = function () { function defineProperties(target, props) { for 
 exports._normalizeAbsolutePath = _normalizeAbsolutePath;
 exports._createRootedPath = _createRootedPath;
 exports._resolveUrl = _resolveUrl;
+exports._ensureArrayWithSingleRoutePerConfig = _ensureArrayWithSingleRoutePerConfig;
 exports.isNavigationCommand = isNavigationCommand;
 exports._buildNavigationPlan = _buildNavigationPlan;
 
@@ -35,21 +36,19 @@ function _inherits(subClass, superClass) { if (typeof superClass !== "function" 
 
 
 
-function _normalizeAbsolutePath(path, hasPushState) {
-  var absolute = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
-
+function _normalizeAbsolutePath(path, hasPushState, root) {
   if (!hasPushState && path[0] !== '#') {
     path = '#' + path;
   }
 
-  if (hasPushState && absolute) {
-    path = path.substring(1, path.length);
+  if (hasPushState && root) {
+    path = root + path.substring(1, path.length);
   }
 
   return path;
 }
 
-function _createRootedPath(fragment, baseUrl, hasPushState, absolute) {
+function _createRootedPath(fragment, baseUrl, hasPushState, root) {
   if (isAbsoluteUrl.test(fragment)) {
     return fragment;
   }
@@ -70,90 +69,35 @@ function _createRootedPath(fragment, baseUrl, hasPushState, absolute) {
     path = path.substring(0, path.length - 1);
   }
 
-  return _normalizeAbsolutePath(path + fragment, hasPushState, absolute);
+  return _normalizeAbsolutePath(path + fragment, hasPushState, root);
 }
 
-function _resolveUrl(fragment, baseUrl, hasPushState) {
+function _resolveUrl(fragment, baseUrl, hasPushState, root) {
   if (isRootedPath.test(fragment)) {
-    return _normalizeAbsolutePath(fragment, hasPushState);
+    return _normalizeAbsolutePath(fragment, hasPushState, root);
   }
 
-  return _createRootedPath(fragment, baseUrl, hasPushState);
+  return _createRootedPath(fragment, baseUrl, hasPushState, root);
+}
+
+function _ensureArrayWithSingleRoutePerConfig(config) {
+  var routeConfigs = [];
+
+  if (Array.isArray(config.route)) {
+    for (var i = 0, ii = config.route.length; i < ii; ++i) {
+      var current = Object.assign({}, config);
+      current.route = config.route[i];
+      routeConfigs.push(current);
+    }
+  } else {
+    routeConfigs.push(Object.assign({}, config));
+  }
+
+  return routeConfigs;
 }
 
 var isRootedPath = /^#?\//;
 var isAbsoluteUrl = /^([a-z][a-z0-9+\-.]*:)?\/\//i;
-
-var pipelineStatus = exports.pipelineStatus = {
-  completed: 'completed',
-  canceled: 'canceled',
-  rejected: 'rejected',
-  running: 'running'
-};
-
-var Pipeline = exports.Pipeline = function () {
-  function Pipeline() {
-    
-
-    this.steps = [];
-  }
-
-  Pipeline.prototype.addStep = function addStep(step) {
-    var run = void 0;
-
-    if (typeof step === 'function') {
-      run = step;
-    } else if (typeof step.getSteps === 'function') {
-      var steps = step.getSteps();
-      for (var i = 0, l = steps.length; i < l; i++) {
-        this.addStep(steps[i]);
-      }
-
-      return this;
-    } else {
-      run = step.run.bind(step);
-    }
-
-    this.steps.push(run);
-
-    return this;
-  };
-
-  Pipeline.prototype.run = function run(instruction) {
-    var index = -1;
-    var steps = this.steps;
-
-    function next() {
-      index++;
-
-      if (index < steps.length) {
-        var currentStep = steps[index];
-
-        try {
-          return currentStep(instruction, next);
-        } catch (e) {
-          return next.reject(e);
-        }
-      } else {
-        return next.complete();
-      }
-    }
-
-    next.complete = createCompletionHandler(next, pipelineStatus.completed);
-    next.cancel = createCompletionHandler(next, pipelineStatus.canceled);
-    next.reject = createCompletionHandler(next, pipelineStatus.rejected);
-
-    return next();
-  };
-
-  return Pipeline;
-}();
-
-function createCompletionHandler(next, status) {
-  return function (output) {
-    return Promise.resolve({ status: status, output: output, completed: status === pipelineStatus.completed });
-  };
-}
 
 var CommitChangesStep = exports.CommitChangesStep = function () {
   function CommitChangesStep() {
@@ -200,8 +144,8 @@ var NavigationInstruction = exports.NavigationInstruction = function () {
 
   NavigationInstruction.prototype.getAllInstructions = function getAllInstructions() {
     var instructions = [this];
-    for (var key in this.viewPortInstructions) {
-      var childInstruction = this.viewPortInstructions[key].childNavigationInstruction;
+    for (var _key in this.viewPortInstructions) {
+      var childInstruction = this.viewPortInstructions[_key].childNavigationInstruction;
       if (childInstruction) {
         instructions.push.apply(instructions, childInstruction.getAllInstructions());
       }
@@ -337,7 +281,7 @@ var NavigationInstruction = exports.NavigationInstruction = function () {
   };
 
   NavigationInstruction.prototype._updateTitle = function _updateTitle() {
-    var title = this._buildTitle();
+    var title = this._buildTitle(this.router.titleSeparator);
     if (title) {
       this.router.history.setTitle(title);
     }
@@ -461,6 +405,77 @@ var RedirectToRoute = exports.RedirectToRoute = function () {
   return RedirectToRoute;
 }();
 
+var pipelineStatus = exports.pipelineStatus = {
+  completed: 'completed',
+  canceled: 'canceled',
+  rejected: 'rejected',
+  running: 'running'
+};
+
+var Pipeline = exports.Pipeline = function () {
+  function Pipeline() {
+    
+
+    this.steps = [];
+  }
+
+  Pipeline.prototype.addStep = function addStep(step) {
+    var run = void 0;
+
+    if (typeof step === 'function') {
+      run = step;
+    } else if (typeof step.getSteps === 'function') {
+      var steps = step.getSteps();
+      for (var i = 0, l = steps.length; i < l; i++) {
+        this.addStep(steps[i]);
+      }
+
+      return this;
+    } else {
+      run = step.run.bind(step);
+    }
+
+    this.steps.push(run);
+
+    return this;
+  };
+
+  Pipeline.prototype.run = function run(instruction) {
+    var index = -1;
+    var steps = this.steps;
+
+    function next() {
+      index++;
+
+      if (index < steps.length) {
+        var currentStep = steps[index];
+
+        try {
+          return currentStep(instruction, next);
+        } catch (e) {
+          return next.reject(e);
+        }
+      } else {
+        return next.complete();
+      }
+    }
+
+    next.complete = createCompletionHandler(next, pipelineStatus.completed);
+    next.cancel = createCompletionHandler(next, pipelineStatus.canceled);
+    next.reject = createCompletionHandler(next, pipelineStatus.rejected);
+
+    return next();
+  };
+
+  return Pipeline;
+}();
+
+function createCompletionHandler(next, status) {
+  return function (output) {
+    return Promise.resolve({ status: status, output: output, completed: status === pipelineStatus.completed });
+  };
+}
+
 var RouterConfiguration = exports.RouterConfiguration = function () {
   function RouterConfiguration() {
     
@@ -471,6 +486,9 @@ var RouterConfiguration = exports.RouterConfiguration = function () {
   }
 
   RouterConfiguration.prototype.addPipelineStep = function addPipelineStep(name, step) {
+    if (step === null || step === undefined) {
+      throw new Error('Pipeline step cannot be null or undefined.');
+    }
     this.pipelineSteps.push({ name: name, step: step });
     return this;
   };
@@ -512,21 +530,11 @@ var RouterConfiguration = exports.RouterConfiguration = function () {
 
   RouterConfiguration.prototype.mapRoute = function mapRoute(config) {
     this.instructions.push(function (router) {
-      var routeConfigs = [];
-
-      if (Array.isArray(config.route)) {
-        for (var i = 0, ii = config.route.length; i < ii; ++i) {
-          var _current = Object.assign({}, config);
-          _current.route = config.route[i];
-          routeConfigs.push(_current);
-        }
-      } else {
-        routeConfigs.push(Object.assign({}, config));
-      }
+      var routeConfigs = _ensureArrayWithSingleRoutePerConfig(config);
 
       var navModel = void 0;
-      for (var _i = 0, _ii = routeConfigs.length; _i < _ii; ++_i) {
-        var _routeConfig = routeConfigs[_i];
+      for (var i = 0, ii = routeConfigs.length; i < ii; ++i) {
+        var _routeConfig = routeConfigs[i];
         _routeConfig.settings = _routeConfig.settings || {};
         if (!navModel) {
           navModel = router.createNavModel(_routeConfig);
@@ -554,6 +562,10 @@ var RouterConfiguration = exports.RouterConfiguration = function () {
       router.title = this.title;
     }
 
+    if (this.titleSeparator) {
+      router.titleSeparator = this.titleSeparator;
+    }
+
     if (this.unknownRouteConfig) {
       router.handleUnknownRoutes(this.unknownRouteConfig);
     }
@@ -566,7 +578,7 @@ var RouterConfiguration = exports.RouterConfiguration = function () {
       router.useViewPortDefaults(this.viewPortDefaults);
     }
 
-    router.options = this.options;
+    Object.assign(router.options, this.options);
 
     var pipelineSteps = this.pipelineSteps;
     if (pipelineSteps.length) {
@@ -575,12 +587,12 @@ var RouterConfiguration = exports.RouterConfiguration = function () {
       }
 
       var pipelineProvider = router.pipelineProvider;
-      for (var _i2 = 0, _ii2 = pipelineSteps.length; _i2 < _ii2; ++_i2) {
-        var _pipelineSteps$_i = pipelineSteps[_i2],
+      for (var _i = 0, _ii = pipelineSteps.length; _i < _ii; ++_i) {
+        var _pipelineSteps$_i = pipelineSteps[_i],
             _name = _pipelineSteps$_i.name,
-            step = _pipelineSteps$_i.step;
+            _step = _pipelineSteps$_i.step;
 
-        pipelineProvider.addStep(_name, step);
+        pipelineProvider.addStep(_name, _step);
       }
     }
   };
@@ -601,6 +613,9 @@ var BuildNavigationPlanStep = exports.BuildNavigationPlanStep = function () {
 
   BuildNavigationPlanStep.prototype.run = function run(navigationInstruction, next) {
     return _buildNavigationPlan(navigationInstruction).then(function (plan) {
+      if (plan instanceof Redirect) {
+        return next.cancel(plan);
+      }
       navigationInstruction.plan = plan;
       return next();
     }).catch(next.cancel);
@@ -613,12 +628,17 @@ function _buildNavigationPlan(instruction, forceLifecycleMinimum) {
   var config = instruction.config;
 
   if ('redirect' in config) {
-    var redirectLocation = _resolveUrl(config.redirect, getInstructionBaseUrl(instruction));
-    if (instruction.queryString) {
-      redirectLocation += '?' + instruction.queryString;
-    }
+    var _router = instruction.router;
+    return _router._createNavigationInstruction(config.redirect).then(function (newInstruction) {
+      var params = Object.keys(newInstruction.params).length ? instruction.params : {};
+      var redirectLocation = _router.generate(newInstruction.config.name, params, instruction.options);
 
-    return Promise.reject(new Redirect(redirectLocation));
+      if (instruction.queryString) {
+        redirectLocation += '?' + instruction.queryString;
+      }
+
+      return Promise.resolve(new Redirect(redirectLocation));
+    });
   }
 
   var prev = instruction.previousInstruction;
@@ -700,22 +720,22 @@ function hasDifferentParameterValues(prev, next) {
   var nextParams = next.params;
   var nextWildCardName = next.config.hasChildRouter ? next.getWildCardName() : null;
 
-  for (var key in nextParams) {
-    if (key === nextWildCardName) {
+  for (var _key2 in nextParams) {
+    if (_key2 === nextWildCardName) {
       continue;
     }
 
-    if (prevParams[key] !== nextParams[key]) {
+    if (prevParams[_key2] !== nextParams[_key2]) {
       return true;
     }
   }
 
-  for (var _key in prevParams) {
-    if (_key === nextWildCardName) {
+  for (var _key3 in prevParams) {
+    if (_key3 === nextWildCardName) {
       continue;
     }
 
-    if (prevParams[_key] !== nextParams[_key]) {
+    if (prevParams[_key3] !== nextParams[_key3]) {
       return true;
     }
   }
@@ -726,32 +746,19 @@ function hasDifferentParameterValues(prev, next) {
 
   var prevQueryParams = prev.queryParams;
   var nextQueryParams = next.queryParams;
-  for (var _key2 in nextQueryParams) {
-    if (prevQueryParams[_key2] !== nextQueryParams[_key2]) {
+  for (var _key4 in nextQueryParams) {
+    if (prevQueryParams[_key4] !== nextQueryParams[_key4]) {
       return true;
     }
   }
 
-  for (var _key3 in prevQueryParams) {
-    if (prevQueryParams[_key3] !== nextQueryParams[_key3]) {
+  for (var _key5 in prevQueryParams) {
+    if (prevQueryParams[_key5] !== nextQueryParams[_key5]) {
       return true;
     }
   }
 
   return false;
-}
-
-function getInstructionBaseUrl(instruction) {
-  var instructionBaseUrlParts = [];
-  instruction = instruction.parentInstruction;
-
-  while (instruction) {
-    instructionBaseUrlParts.unshift(instruction.getBaseUrl());
-    instruction = instruction.parentInstruction;
-  }
-
-  instructionBaseUrlParts.unshift('/');
-  return instructionBaseUrlParts.join('');
 }
 
 var Router = exports.Router = function () {
@@ -840,7 +847,7 @@ var Router = exports.Router = function () {
     }
 
     this.isExplicitNavigation = true;
-    return this.history.navigate(_resolveUrl(fragment, this.baseUrl, this.history._hasPushState), options);
+    return this.history.navigate(_resolveUrl(fragment, this.baseUrl, this.history._hasPushState, this.history.root), options);
   };
 
   Router.prototype.navigateToRoute = function navigateToRoute(route, params, options) {
@@ -872,8 +879,20 @@ var Router = exports.Router = function () {
     }
 
     var path = this._recognizer.generate(name, params);
-    var rootedPath = _createRootedPath(path, this.baseUrl, this.history._hasPushState, options.absolute);
-    return options.absolute ? '' + this.history.getAbsoluteRoot() + rootedPath : rootedPath;
+    var rootedPath = _createRootedPath(path, this.baseUrl, this.history._hasPushState, this.history.root);
+    if (options.absolute) {
+      var origin = this.history.getAbsoluteRoot();
+      if (this.history._hasPushState) {
+        if (this.history.root) {
+          origin = origin.substring(0, origin.length - this.history.root.length);
+        } else {
+          origin = origin.substring(0, origin.length - 1);
+        }
+      }
+
+      rootedPath = origin + rootedPath;
+    }
+    return rootedPath;
   };
 
   Router.prototype.createNavModel = function createNavModel(config) {
@@ -888,6 +907,12 @@ var Router = exports.Router = function () {
   };
 
   Router.prototype.addRoute = function addRoute(config, navModel) {
+    if (Array.isArray(config.route)) {
+      var routeConfigs = _ensureArrayWithSingleRoutePerConfig(config);
+      routeConfigs.forEach(this.addRoute.bind(this));
+      return;
+    }
+
     validateRouteConfig(config, this.routes);
 
     if (!('viewPorts' in config) && !config.navigationStrategy) {
@@ -986,11 +1011,11 @@ var Router = exports.Router = function () {
     var nav = this.navigation;
 
     for (var i = 0, length = nav.length; i < length; i++) {
-      var _current2 = nav[i];
-      if (!_current2.config.href) {
-        _current2.href = _createRootedPath(_current2.relativeHref, this.baseUrl, this.history._hasPushState);
+      var _current = nav[i];
+      if (!_current.config.href) {
+        _current.href = _createRootedPath(_current.relativeHref, this.baseUrl, this.history._hasPushState, this.history.root);
       } else {
-        _current2.href = _normalizeAbsolutePath(_current2.config.href, this.history._hasPushState);
+        _current.href = _normalizeAbsolutePath(_current.config.href, this.history._hasPushState, this.history.root);
       }
     }
   };
@@ -1064,20 +1089,20 @@ var Router = exports.Router = function () {
 
       return evaluateNavigationStrategy(_instruction2, this.catchAllHandler);
     } else if (this.parent) {
-      var _router = this._parentCatchAllHandler(this.parent);
+      var _router2 = this._parentCatchAllHandler(this.parent);
 
-      if (_router) {
-        var newParentInstruction = this._findParentInstructionFromRouter(_router, parentInstruction);
+      if (_router2) {
+        var newParentInstruction = this._findParentInstructionFromRouter(_router2, parentInstruction);
 
         var _instruction3 = new NavigationInstruction(Object.assign({}, instructionInit, {
           params: { path: fragment },
           queryParams: results ? results.queryParams : {},
-          router: _router,
+          router: _router2,
           parentInstruction: newParentInstruction,
           parentCatchHandler: true,
           config: null }));
 
-        return evaluateNavigationStrategy(_instruction3, _router.catchAllHandler);
+        return evaluateNavigationStrategy(_instruction3, _router2.catchAllHandler);
       }
     }
 
@@ -1308,12 +1333,12 @@ function processActivatable(navigationInstruction, callbackName, next, ignoreRes
 
     if (i < length) {
       try {
-        var _current3$viewModel;
+        var _current2$viewModel;
 
-        var _current3 = infos[i];
-        var _result2 = (_current3$viewModel = _current3.viewModel)[callbackName].apply(_current3$viewModel, _current3.lifecycleArgs);
+        var _current2 = infos[i];
+        var _result2 = (_current2$viewModel = _current2.viewModel)[callbackName].apply(_current2$viewModel, _current2.lifecycleArgs);
         return processPotential(_result2, function (val) {
-          return inspect(val, _current3.router);
+          return inspect(val, _current2.router);
         }, next.cancel);
       } catch (error) {
         return next.cancel(error);
@@ -1832,8 +1857,9 @@ function processResult(instruction, result, instructionCount, router) {
   }
 
   var finalResult = null;
+  var navigationCommandResult = null;
   if (isNavigationCommand(result.output)) {
-    result.output.navigate(router);
+    navigationCommandResult = result.output.navigate(router);
   } else {
     finalResult = result;
 
@@ -1846,7 +1872,9 @@ function processResult(instruction, result, instructionCount, router) {
     }
   }
 
-  return router._dequeueInstruction(instructionCount + 1).then(function (innerResult) {
+  return Promise.resolve(navigationCommandResult).then(function (_) {
+    return router._dequeueInstruction(instructionCount + 1);
+  }).then(function (innerResult) {
     return finalResult || innerResult || result;
   });
 }

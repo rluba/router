@@ -4,19 +4,19 @@ import {Container} from 'aurelia-dependency-injection';
 import {History} from 'aurelia-history';
 import {EventAggregator} from 'aurelia-event-aggregator';
 
-export function _normalizeAbsolutePath(path, hasPushState, absolute = false) {
+export function _normalizeAbsolutePath(path, hasPushState, root) {
   if (!hasPushState && path[0] !== '#') {
     path = '#' + path;
   }
 
-  if (hasPushState && absolute) {
-    path = path.substring(1, path.length);
+  if (hasPushState && root) {
+    path = root + path.substring(1, path.length);
   }
 
   return path;
 }
 
-export function _createRootedPath(fragment, baseUrl, hasPushState, absolute) {
+export function _createRootedPath(fragment, baseUrl, hasPushState, root) {
   if (isAbsoluteUrl.test(fragment)) {
     return fragment;
   }
@@ -37,153 +37,35 @@ export function _createRootedPath(fragment, baseUrl, hasPushState, absolute) {
     path = path.substring(0, path.length - 1);
   }
 
-  return _normalizeAbsolutePath(path + fragment, hasPushState, absolute);
+  return _normalizeAbsolutePath(path + fragment, hasPushState, root);
 }
 
-export function _resolveUrl(fragment, baseUrl, hasPushState) {
+export function _resolveUrl(fragment, baseUrl, hasPushState, root) {
   if (isRootedPath.test(fragment)) {
-    return _normalizeAbsolutePath(fragment, hasPushState);
+    return _normalizeAbsolutePath(fragment, hasPushState, root);
   }
 
-  return _createRootedPath(fragment, baseUrl, hasPushState);
+  return _createRootedPath(fragment, baseUrl, hasPushState, root);
+}
+
+export function _ensureArrayWithSingleRoutePerConfig(config) {
+  let routeConfigs = [];
+
+  if (Array.isArray(config.route)) {
+    for (let i = 0, ii = config.route.length; i < ii; ++i) {
+      let current = Object.assign({}, config);
+      current.route = config.route[i];
+      routeConfigs.push(current);
+    }
+  } else {
+    routeConfigs.push(Object.assign({}, config));
+  }
+
+  return routeConfigs;
 }
 
 const isRootedPath = /^#?\//;
 const isAbsoluteUrl = /^([a-z][a-z0-9+\-.]*:)?\/\//i;
-
-/**
-* The status of a Pipeline.
-*/
-export const pipelineStatus = {
-  completed: 'completed',
-  canceled: 'canceled',
-  rejected: 'rejected',
-  running: 'running'
-};
-
-/**
-* A callback to indicate when pipeline processing should advance to the next step
-* or be aborted.
-*/
-interface Next {
-  /**
-  * Indicates the successful completion of the pipeline step.
-  */
-  (): Promise<any>,
-
-  /**
-  * Indicates the successful completion of the entire pipeline.
-  */
-  complete: (result?: any) => Promise<any>,
-
-  /**
-  * Indicates that the pipeline should cancel processing.
-  */
-  cancel: (result?: any) => Promise<any>,
-
-  /**
-  * Indicates that pipeline processing has failed and should be stopped.
-  */
-  reject: (result?: any) => Promise<any>
-}
-
-/**
-* A step to be run during processing of the pipeline.
-*/
-interface PipelineStep {
-  /**
-   * Execute the pipeline step. The step should invoke next(), next.complete(),
-   * next.cancel(), or next.reject() to allow the pipeline to continue.
-   *
-   * @param instruction The navigation instruction.
-   * @param next The next step in the pipeline.
-   */
-  run(instruction: NavigationInstruction, next: Next): Promise<any>;
-}
-
-/**
-* The result of a pipeline run.
-*/
-interface PipelineResult {
-  status: string;
-  instruction: NavigationInstruction;
-  output: any;
-  completed: boolean;
-}
-
-/**
-* The class responsible for managing and processing the navigation pipeline.
-*/
-export class Pipeline {
-  /**
-  * The pipeline steps.
-  */
-  steps: Array<Function|PipelineStep> = [];
-
-  /**
-  * Adds a step to the pipeline.
-  *
-  * @param step The pipeline step.
-  */
-  addStep(step: PipelineStep): Pipeline {
-    let run;
-
-    if (typeof step === 'function') {
-      run = step;
-    } else if (typeof step.getSteps === 'function') {
-      let steps = step.getSteps();
-      for (let i = 0, l = steps.length; i < l; i++) {
-        this.addStep(steps[i]);
-      }
-
-      return this;
-    } else {
-      run = step.run.bind(step);
-    }
-
-    this.steps.push(run);
-
-    return this;
-  }
-
-  /**
-  * Runs the pipeline.
-  *
-  * @param instruction The navigation instruction to process.
-  */
-  run(instruction: NavigationInstruction): Promise<PipelineResult> {
-    let index = -1;
-    let steps = this.steps;
-
-    function next() {
-      index++;
-
-      if (index < steps.length) {
-        let currentStep = steps[index];
-
-        try {
-          return currentStep(instruction, next);
-        } catch (e) {
-          return next.reject(e);
-        }
-      } else {
-        return next.complete();
-      }
-    }
-
-    next.complete = createCompletionHandler(next, pipelineStatus.completed);
-    next.cancel = createCompletionHandler(next, pipelineStatus.canceled);
-    next.reject = createCompletionHandler(next, pipelineStatus.rejected);
-
-    return next();
-  }
-}
-
-function createCompletionHandler(next, status) {
-  return (output) => {
-    return Promise.resolve({ status, output, completed: status === pipelineStatus.completed });
-  };
-}
 
 interface NavigationInstructionInit {
   fragment: string,
@@ -426,7 +308,7 @@ export class NavigationInstruction {
   }
 
   _updateTitle(): void {
-    let title = this._buildTitle();
+    let title = this._buildTitle(this.router.titleSeparator);
     if (title) {
       this.router.history.setTitle(title);
     }
@@ -532,7 +414,7 @@ export class NavModel {
 /**
 * A configuration object that describes a route.
 */
-interface RouteConfig {
+export interface RouteConfig {
   /**
   * The route pattern to match against incoming URL fragments, or an array of patterns.
   */
@@ -637,7 +519,7 @@ interface RouteConfig {
 /**
 * An optional interface describing the canActivate convention.
 */
-interface RoutableComponentCanActivate {
+export interface RoutableComponentCanActivate {
   /**
   * Implement this hook if you want to control whether or not your view-model can be navigated to.
   * Return a boolean value, a promise for a boolean value, or a navigation command.
@@ -648,7 +530,7 @@ interface RoutableComponentCanActivate {
 /**
 * An optional interface describing the activate convention.
 */
-interface RoutableComponentActivate {
+export interface RoutableComponentActivate {
   /**
   * Implement this hook if you want to perform custom logic just before your view-model is displayed.
   * You can optionally return a promise to tell the router to wait to bind and attach the view until
@@ -660,7 +542,7 @@ interface RoutableComponentActivate {
 /**
 * An optional interface describing the canDeactivate convention.
 */
-interface RoutableComponentCanDeactivate {
+export interface RoutableComponentCanDeactivate {
   /**
   * Implement this hook if you want to control whether or not the router can navigate away from your
   * view-model when moving to a new route. Return a boolean value, a promise for a boolean value,
@@ -672,7 +554,7 @@ interface RoutableComponentCanDeactivate {
 /**
 * An optional interface describing the deactivate convention.
 */
-interface RoutableComponentDeactivate {
+export interface RoutableComponentDeactivate {
   /**
   * Implement this hook if you want to perform custom logic when your view-model is being
   * navigated away from. You can optionally return a promise to tell the router to wait until
@@ -684,7 +566,7 @@ interface RoutableComponentDeactivate {
 /**
 * An optional interface describing the determineActivationStrategy convention.
 */
-interface RoutableComponentDetermineActivationStrategy {
+export interface RoutableComponentDetermineActivationStrategy {
   /**
   * Implement this hook if you want to give hints to the router about the activation strategy, when reusing
   * a view model for different routes. Available values are 'replace' and 'invoke-lifecycle'.
@@ -695,7 +577,7 @@ interface RoutableComponentDetermineActivationStrategy {
 /**
 * An optional interface describing the router configuration convention.
 */
-interface ConfiguresRouter {
+export interface ConfiguresRouter {
   /**
   * Implement this hook if you want to configure a router.
   */
@@ -705,7 +587,7 @@ interface ConfiguresRouter {
 /**
 * An optional interface describing the available activation strategies.
 */
-interface ActivationStrategy {
+export interface ActivationStrategy {
   /**
   * Reuse the existing view model, without invoking Router lifecycle hooks.
   */
@@ -719,6 +601,35 @@ interface ActivationStrategy {
   */
   replace: 'replace';
 }
+
+/**
+* A step to be run during processing of the pipeline.
+*/
+export interface PipelineStep {
+  /**
+   * Execute the pipeline step. The step should invoke next(), next.complete(),
+   * next.cancel(), or next.reject() to allow the pipeline to continue.
+   *
+   * @param instruction The navigation instruction.
+   * @param next The next step in the pipeline.
+   */
+  run(instruction: NavigationInstruction, next: Next): Promise<any>;
+}
+
+/**
+* The result of a pipeline run.
+*/
+export interface PipelineResult {
+  status: string;
+  instruction: NavigationInstruction;
+  output: any;
+  completed: boolean;
+}
+
+/**
+* The result of a router navigation.
+*/
+export type NavigationResult = Promise<PipelineResult | boolean>;
 
 /**
 * When a navigation command is encountered, the current navigation
@@ -810,17 +721,135 @@ export class RedirectToRoute {
 }
 
 /**
+* The status of a Pipeline.
+*/
+export const pipelineStatus = {
+  completed: 'completed',
+  canceled: 'canceled',
+  rejected: 'rejected',
+  running: 'running'
+};
+
+/**
+* A callback to indicate when pipeline processing should advance to the next step
+* or be aborted.
+*/
+interface Next {
+  /**
+  * Indicates the successful completion of the pipeline step.
+  */
+  (): Promise<any>,
+
+  /**
+  * Indicates the successful completion of the entire pipeline.
+  */
+  complete: (result?: any) => Promise<any>,
+
+  /**
+  * Indicates that the pipeline should cancel processing.
+  */
+  cancel: (result?: any) => Promise<any>,
+
+  /**
+  * Indicates that pipeline processing has failed and should be stopped.
+  */
+  reject: (result?: any) => Promise<any>
+}
+
+/**
+* The class responsible for managing and processing the navigation pipeline.
+*/
+export class Pipeline {
+  /**
+  * The pipeline steps.
+  */
+  steps: Array<Function | PipelineStep> = [];
+
+  /**
+  * Adds a step to the pipeline.
+  *
+  * @param step The pipeline step.
+  */
+  addStep(step: PipelineStep): Pipeline {
+    let run;
+
+    if (typeof step === 'function') {
+      run = step;
+    } else if (typeof step.getSteps === 'function') {
+      let steps = step.getSteps();
+      for (let i = 0, l = steps.length; i < l; i++) {
+        this.addStep(steps[i]);
+      }
+
+      return this;
+    } else {
+      run = step.run.bind(step);
+    }
+
+    this.steps.push(run);
+
+    return this;
+  }
+
+  /**
+  * Runs the pipeline.
+  *
+  * @param instruction The navigation instruction to process.
+  */
+  run(instruction: NavigationInstruction): Promise<PipelineResult> {
+    let index = -1;
+    let steps = this.steps;
+
+    function next() {
+      index++;
+
+      if (index < steps.length) {
+        let currentStep = steps[index];
+
+        try {
+          return currentStep(instruction, next);
+        } catch (e) {
+          return next.reject(e);
+        }
+      } else {
+        return next.complete();
+      }
+    }
+
+    next.complete = createCompletionHandler(next, pipelineStatus.completed);
+    next.cancel = createCompletionHandler(next, pipelineStatus.canceled);
+    next.reject = createCompletionHandler(next, pipelineStatus.rejected);
+
+    return next();
+  }
+}
+
+function createCompletionHandler(next, status) {
+  return (output) => {
+    return Promise.resolve({ status, output, completed: status === pipelineStatus.completed });
+  };
+}
+
+/**
  * Class used to configure a [[Router]] instance.
  *
  * @constructor
  */
 export class RouterConfiguration {
-  instructions = [];
-  options: any = {};
-  pipelineSteps: Array<Function|PipelineStep> = [];
+  instructions: Array<(router: Router) => void> = [];
+  options: {
+    [key: string]: any;
+    compareQueryParams?: boolean;
+    root?: string;
+    pushState?: boolean;
+    hashChange?: boolean;
+    silent?: boolean;
+  } = {};
+  pipelineSteps: Array<{name: string, step: Function|PipelineStep}> = [];
   title: string;
-  unknownRouteConfig: any;
-  viewPortDefaults: any;
+  titleSeparator: string;
+  unknownRouteConfig: string|RouteConfig|((instruction: NavigationInstruction) => string|RouteConfig|Promise<string|RouteConfig>);
+  viewPortDefaults: {[name: string]: {moduleId: string|void; [key: string]: any}};
 
   /**
   * Adds a step to be run during the [[Router]]'s navigation pipeline.
@@ -830,6 +859,9 @@ export class RouterConfiguration {
   * @chainable
   */
   addPipelineStep(name: string, step: Function|PipelineStep): RouterConfiguration {
+    if (step === null || step === undefined) {
+      throw new Error('Pipeline step cannot be null or undefined.');
+    }
     this.pipelineSteps.push({name, step});
     return this;
   }
@@ -907,7 +939,7 @@ export class RouterConfiguration {
    *  default, of the form { viewPortName: { moduleId } }.
    * @chainable
    */
-  useViewPortDefaults(viewPortConfig: any) {
+  useViewPortDefaults(viewPortConfig: {[name: string]: {moduleId: string; [key: string]: any}}): RouterConfiguration {
     this.viewPortDefaults = viewPortConfig;
     return this;
   }
@@ -920,17 +952,7 @@ export class RouterConfiguration {
   */
   mapRoute(config: RouteConfig): RouterConfiguration {
     this.instructions.push(router => {
-      let routeConfigs = [];
-
-      if (Array.isArray(config.route)) {
-        for (let i = 0, ii = config.route.length; i < ii; ++i) {
-          let current = Object.assign({}, config);
-          current.route = config.route[i];
-          routeConfigs.push(current);
-        }
-      } else {
-        routeConfigs.push(Object.assign({}, config));
-      }
+      let routeConfigs = _ensureArrayWithSingleRoutePerConfig(config);
 
       let navModel;
       for (let i = 0, ii = routeConfigs.length; i < ii; ++i) {
@@ -974,6 +996,10 @@ export class RouterConfiguration {
       router.title = this.title;
     }
 
+    if (this.titleSeparator) {
+      router.titleSeparator = this.titleSeparator;
+    }
+
     if (this.unknownRouteConfig) {
       router.handleUnknownRoutes(this.unknownRouteConfig);
     }
@@ -986,7 +1012,7 @@ export class RouterConfiguration {
       router.useViewPortDefaults(this.viewPortDefaults);
     }
 
-    router.options = this.options;
+    Object.assign(router.options, this.options);
 
     let pipelineSteps = this.pipelineSteps;
     if (pipelineSteps.length) {
@@ -1016,6 +1042,9 @@ export class BuildNavigationPlanStep {
   run(navigationInstruction: NavigationInstruction, next: Function) {
     return _buildNavigationPlan(navigationInstruction)
       .then(plan => {
+        if (plan instanceof Redirect) {
+          return next.cancel(plan);
+        }
         navigationInstruction.plan = plan;
         return next();
       }).catch(next.cancel);
@@ -1026,12 +1055,18 @@ export function _buildNavigationPlan(instruction: NavigationInstruction, forceLi
   let config = instruction.config;
 
   if ('redirect' in config) {
-    let redirectLocation = _resolveUrl(config.redirect, getInstructionBaseUrl(instruction));
-    if (instruction.queryString) {
-      redirectLocation += '?' + instruction.queryString;
-    }
+    let router = instruction.router;
+    return router._createNavigationInstruction(config.redirect)
+    .then(newInstruction => {
+      let params = Object.keys(newInstruction.params).length ? instruction.params : {};
+      let redirectLocation = router.generate(newInstruction.config.name, params, instruction.options);
 
-    return Promise.reject(new Redirect(redirectLocation));
+      if (instruction.queryString) {
+        redirectLocation += '?' + instruction.queryString;
+      }
+
+      return Promise.resolve(new Redirect(redirectLocation));
+    });
   }
 
   let prev = instruction.previousInstruction;
@@ -1151,19 +1186,6 @@ function hasDifferentParameterValues(prev: NavigationInstruction, next: Navigati
   return false;
 }
 
-function getInstructionBaseUrl(instruction: NavigationInstruction): string {
-  let instructionBaseUrlParts = [];
-  instruction = instruction.parentInstruction;
-
-  while (instruction) {
-    instructionBaseUrlParts.unshift(instruction.getBaseUrl());
-    instruction = instruction.parentInstruction;
-  }
-
-  instructionBaseUrlParts.unshift('/');
-  return instructionBaseUrlParts.join('');
-}
-
 /**
 * The primary class responsible for handling routing and navigation.
 *
@@ -1180,6 +1202,16 @@ export class Router {
   * The [[Router]]'s current base URL, typically based on the [[Router.currentInstruction]].
   */
   baseUrl: string;
+
+  /**
+   * If defined, used in generation of document title for [[Router]]'s routes.
+   */
+  title: string | undefined;
+
+  /**
+   * The separator used in the document title between [[Router]]'s routes.
+   */
+  titleSeparator: string | undefined;
 
   /**
   * True if the [[Router]] has been configured.
@@ -1360,13 +1392,13 @@ export class Router {
   * @param fragment The URL fragment to use as the navigation destination.
   * @param options The navigation options. See [[History.NavigationOptions]] for all available options.
   */
-  navigate(fragment: string, options?: any): boolean {
+  navigate(fragment: string, options?: any): NavigationResult {
     if (!this.isConfigured && this.parent) {
       return this.parent.navigate(fragment, options);
     }
 
     this.isExplicitNavigation = true;
-    return this.history.navigate(_resolveUrl(fragment, this.baseUrl, this.history._hasPushState), options);
+    return this.history.navigate(_resolveUrl(fragment, this.baseUrl, this.history._hasPushState, this.history.root), options);
   }
 
   /**
@@ -1377,7 +1409,7 @@ export class Router {
   * @param params The route parameters to be used when populating the route pattern.
   * @param options The navigation options. See [[History.NavigationOptions]] for all available options.
   */
-  navigateToRoute(route: string, params?: any, options?: any): boolean {
+  navigateToRoute(route: string, params?: any, options?: any): NavigationResult {
     let path = this.generate(route, params);
     return this.navigate(path, options);
   }
@@ -1421,8 +1453,21 @@ export class Router {
     }
 
     let path = this._recognizer.generate(name, params);
-    let rootedPath = _createRootedPath(path, this.baseUrl, this.history._hasPushState, options.absolute);
-    return options.absolute ? `${this.history.getAbsoluteRoot()}${rootedPath}` : rootedPath;
+    let rootedPath = _createRootedPath(path, this.baseUrl, this.history._hasPushState, this.history.root);
+    if (options.absolute) {
+      // Hamfisted workaround because history does not expose the origin without the root
+      let origin = this.history.getAbsoluteRoot();
+      if (this.history._hasPushState) {
+        if (this.history.root) {
+          origin = origin.substring(0, origin.length - this.history.root.length);
+        } else {
+          origin = origin.substring(0, origin.length - 1);
+        }
+      }
+
+      rootedPath = origin + rootedPath;
+    }
+    return rootedPath;
   }
 
   /**
@@ -1448,6 +1493,12 @@ export class Router {
   * @param navModel The [[NavModel]] to use for the route. May be omitted for single-pattern routes.
   */
   addRoute(config: RouteConfig, navModel?: NavModel): void {
+    if (Array.isArray(config.route)) {
+      let routeConfigs = _ensureArrayWithSingleRoutePerConfig(config);
+      routeConfigs.forEach(this.addRoute.bind(this));
+      return;
+    }
+
     validateRouteConfig(config, this.routes);
 
     if (!('viewPorts' in config) && !config.navigationStrategy) {
@@ -1567,9 +1618,9 @@ export class Router {
     for (let i = 0, length = nav.length; i < length; i++) {
       let current = nav[i];
       if (!current.config.href) {
-        current.href = _createRootedPath(current.relativeHref, this.baseUrl, this.history._hasPushState);
+        current.href = _createRootedPath(current.relativeHref, this.baseUrl, this.history._hasPushState, this.history.root);
       } else {
-        current.href = _normalizeAbsolutePath(current.config.href, this.history._hasPushState);
+        current.href = _normalizeAbsolutePath(current.config.href, this.history._hasPushState, this.history.root);
       }
     }
   }
@@ -2400,8 +2451,9 @@ function processResult(instruction, result, instructionCount, router) {
   }
 
   let finalResult = null;
+  let navigationCommandResult = null;
   if (isNavigationCommand(result.output)) {
-    result.output.navigate(router);
+    navigationCommandResult = result.output.navigate(router);
   } else {
     finalResult = result;
 
@@ -2414,7 +2466,8 @@ function processResult(instruction, result, instructionCount, router) {
     }
   }
 
-  return router._dequeueInstruction(instructionCount + 1)
+  return Promise.resolve(navigationCommandResult)
+    .then(_ => router._dequeueInstruction(instructionCount + 1))
     .then(innerResult => finalResult || innerResult || result);
 }
 
