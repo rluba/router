@@ -121,15 +121,16 @@ System.register(['aurelia-logging', 'aurelia-route-recognizer', 'aurelia-depende
 
     if ('redirect' in config) {
       var _router = instruction.router;
-      return _router._createNavigationInstruction(config.redirect).then(function (newInstruction) {
+      return _router._createNavigationInstruction(config.redirect, instruction.parentInstruction).then(function (newInstruction) {
         var params = Object.keys(newInstruction.params).length ? instruction.params : {};
-        var redirectLocation = _router.generate(newInstruction.config.name, params, instruction.options);
+        var baseUrl = getInstructionBaseUrl(instruction);
+        var redirectLocation = _router.generate(newInstruction.config.name, params, instruction.options, baseUrl);
 
         if (instruction.queryString) {
           redirectLocation += '?' + instruction.queryString;
         }
 
-        return Promise.resolve(new Redirect(redirectLocation));
+        return Promise.resolve(new Redirect(redirectLocation, { useHistory: true }));
       });
     }
 
@@ -175,6 +176,9 @@ System.register(['aurelia-logging', 'aurelia-route-recognizer', 'aurelia-depende
             viewPortPlan.childNavigationInstruction = childInstruction;
 
             return _buildNavigationPlan(childInstruction, viewPortPlan.strategy === activationStrategy.invokeLifecycle).then(function (childPlan) {
+              if (childPlan instanceof Redirect) {
+                return Promise.reject(childPlan);
+              }
               childInstruction.plan = childPlan;
             });
           });
@@ -208,6 +212,18 @@ System.register(['aurelia-logging', 'aurelia-route-recognizer', 'aurelia-depende
   }
 
   _export('_buildNavigationPlan', _buildNavigationPlan);
+
+  function getInstructionBaseUrl(instruction) {
+    var instructionBaseUrlParts = [];
+    instruction = instruction.parentInstruction;
+
+    while (instruction) {
+      instructionBaseUrlParts.unshift(instruction.getBaseUrl());
+      instruction = instruction.parentInstruction;
+    }
+
+    return instructionBaseUrlParts.join('');
+  }
 
   function hasDifferentParameterValues(prev, next) {
     var prevParams = prev.params;
@@ -530,6 +546,9 @@ System.register(['aurelia-logging', 'aurelia-route-recognizer', 'aurelia-depende
           viewPortPlan.childNavigationInstruction = childInstruction;
 
           return _buildNavigationPlan(childInstruction).then(function (childPlan) {
+            if (childPlan instanceof Redirect) {
+              return Promise.reject(childPlan);
+            }
             childInstruction.plan = childPlan;
             viewPortInstruction.childNavigationInstruction = childInstruction;
 
@@ -953,8 +972,12 @@ System.register(['aurelia-logging', 'aurelia-route-recognizer', 'aurelia-depende
         };
 
         Redirect.prototype.navigate = function navigate(appRouter) {
-          var navigatingRouter = this.options.useAppRouter ? appRouter : this.router || appRouter;
-          navigatingRouter.navigate(this.url, this.options);
+          if (this.options.useHistory) {
+            appRouter.history.navigate(this.url, this.options);
+          } else {
+            var navigatingRouter = this.options.useAppRouter ? appRouter : this.router || appRouter;
+            navigatingRouter.navigate(this.url, this.options);
+          }
         };
 
         return Redirect;
@@ -1319,6 +1342,7 @@ System.register(['aurelia-logging', 'aurelia-route-recognizer', 'aurelia-depende
 
         Router.prototype.generate = function generate(name, params) {
           var options = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
+          var baseUrlOverride = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : null;
 
           var hasRoute = this._recognizer.hasRoute(name);
           if ((!this.isConfigured || !hasRoute) && this.parent) {
@@ -1330,7 +1354,7 @@ System.register(['aurelia-logging', 'aurelia-route-recognizer', 'aurelia-depende
           }
 
           var path = this._recognizer.generate(name, params);
-          var rootedPath = _createRootedPath(path, this.baseUrl, this.history._hasPushState, this.history.root);
+          var rootedPath = _createRootedPath(path, baseUrlOverride ? baseUrlOverride : this.baseUrl, this.history._hasPushState, this.history.root);
           if (options.absolute) {
             var origin = this.history.getAbsoluteRoot();
             if (this.history._hasPushState) {

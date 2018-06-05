@@ -307,8 +307,12 @@ export let Redirect = class Redirect {
   }
 
   navigate(appRouter) {
-    let navigatingRouter = this.options.useAppRouter ? appRouter : this.router || appRouter;
-    navigatingRouter.navigate(this.url, this.options);
+    if (this.options.useHistory) {
+      appRouter.history.navigate(this.url, this.options);
+    } else {
+      let navigatingRouter = this.options.useAppRouter ? appRouter : this.router || appRouter;
+      navigatingRouter.navigate(this.url, this.options);
+    }
   }
 };
 
@@ -537,15 +541,16 @@ export function _buildNavigationPlan(instruction, forceLifecycleMinimum) {
 
   if ('redirect' in config) {
     let router = instruction.router;
-    return router._createNavigationInstruction(config.redirect).then(newInstruction => {
+    return router._createNavigationInstruction(config.redirect, instruction.parentInstruction).then(newInstruction => {
       let params = Object.keys(newInstruction.params).length ? instruction.params : {};
-      let redirectLocation = router.generate(newInstruction.config.name, params, instruction.options);
+      const baseUrl = getInstructionBaseUrl(instruction);
+      let redirectLocation = router.generate(newInstruction.config.name, params, instruction.options, baseUrl);
 
       if (instruction.queryString) {
         redirectLocation += '?' + instruction.queryString;
       }
 
-      return Promise.resolve(new Redirect(redirectLocation));
+      return Promise.resolve(new Redirect(redirectLocation, { useHistory: true }));
     });
   }
 
@@ -589,6 +594,9 @@ export function _buildNavigationPlan(instruction, forceLifecycleMinimum) {
           viewPortPlan.childNavigationInstruction = childInstruction;
 
           return _buildNavigationPlan(childInstruction, viewPortPlan.strategy === activationStrategy.invokeLifecycle).then(childPlan => {
+            if (childPlan instanceof Redirect) {
+              return Promise.reject(childPlan);
+            }
             childInstruction.plan = childPlan;
           });
         });
@@ -613,6 +621,18 @@ export function _buildNavigationPlan(instruction, forceLifecycleMinimum) {
   }
 
   return Promise.resolve(plan);
+}
+
+function getInstructionBaseUrl(instruction) {
+  const instructionBaseUrlParts = [];
+  instruction = instruction.parentInstruction;
+
+  while (instruction) {
+    instructionBaseUrlParts.unshift(instruction.getBaseUrl());
+    instruction = instruction.parentInstruction;
+  }
+
+  return instructionBaseUrlParts.join('');
 }
 
 function hasDifferentParameterValues(prev, next) {
@@ -762,7 +782,7 @@ export let Router = class Router {
     return childRouter;
   }
 
-  generate(name, params, options = {}) {
+  generate(name, params, options = {}, baseUrlOverride = null) {
     let hasRoute = this._recognizer.hasRoute(name);
     if ((!this.isConfigured || !hasRoute) && this.parent) {
       return this.parent.generate(name, params);
@@ -773,7 +793,7 @@ export let Router = class Router {
     }
 
     let path = this._recognizer.generate(name, params);
-    let rootedPath = _createRootedPath(path, this.baseUrl, this.history._hasPushState, this.history.root);
+    let rootedPath = _createRootedPath(path, baseUrlOverride ? baseUrlOverride : this.baseUrl, this.history._hasPushState, this.history.root);
     if (options.absolute) {
       let origin = this.history.getAbsoluteRoot();
       if (this.history._hasPushState) {
@@ -1361,6 +1381,9 @@ function loadRoute(routeLoader, navigationInstruction, viewPortPlan) {
         viewPortPlan.childNavigationInstruction = childInstruction;
 
         return _buildNavigationPlan(childInstruction).then(childPlan => {
+          if (childPlan instanceof Redirect) {
+            return Promise.reject(childPlan);
+          }
           childInstruction.plan = childPlan;
           viewPortInstruction.childNavigationInstruction = childInstruction;
 

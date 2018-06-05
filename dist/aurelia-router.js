@@ -679,8 +679,12 @@ export class Redirect {
   * @param appRouter The router to be redirected.
   */
   navigate(appRouter: Router): void {
-    let navigatingRouter = this.options.useAppRouter ? appRouter : (this.router || appRouter);
-    navigatingRouter.navigate(this.url, this.options);
+    if (this.options.useHistory) {
+      appRouter.history.navigate(this.url, this.options);
+    } else {
+      let navigatingRouter = this.options.useAppRouter ? appRouter : (this.router || appRouter);
+      navigatingRouter.navigate(this.url, this.options);
+    }
   }
 }
 
@@ -1056,16 +1060,17 @@ export function _buildNavigationPlan(instruction: NavigationInstruction, forceLi
 
   if ('redirect' in config) {
     let router = instruction.router;
-    return router._createNavigationInstruction(config.redirect)
+    return router._createNavigationInstruction(config.redirect, instruction.parentInstruction)
     .then(newInstruction => {
       let params = Object.keys(newInstruction.params).length ? instruction.params : {};
-      let redirectLocation = router.generate(newInstruction.config.name, params, instruction.options);
+      const baseUrl = getInstructionBaseUrl(instruction);
+      let redirectLocation = router.generate(newInstruction.config.name, params, instruction.options, baseUrl);
 
       if (instruction.queryString) {
         redirectLocation += '?' + instruction.queryString;
       }
 
-      return Promise.resolve(new Redirect(redirectLocation));
+      return Promise.resolve(new Redirect(redirectLocation, {useHistory: true}));
     });
   }
 
@@ -1114,6 +1119,9 @@ export function _buildNavigationPlan(instruction: NavigationInstruction, forceLi
               childInstruction,
               viewPortPlan.strategy === activationStrategy.invokeLifecycle)
               .then(childPlan => {
+                if (childPlan instanceof Redirect) {
+                  return Promise.reject(childPlan);
+                }
                 childInstruction.plan = childPlan;
               });
           });
@@ -1138,6 +1146,18 @@ export function _buildNavigationPlan(instruction: NavigationInstruction, forceLi
   }
 
   return Promise.resolve(plan);
+}
+
+function getInstructionBaseUrl(instruction) {
+  const instructionBaseUrlParts = [];
+  instruction = instruction.parentInstruction;
+
+  while (instruction) {
+    instructionBaseUrlParts.unshift(instruction.getBaseUrl());
+    instruction = instruction.parentInstruction;
+  }
+
+  return instructionBaseUrlParts.join('');
 }
 
 function hasDifferentParameterValues(prev: NavigationInstruction, next: NavigationInstruction): boolean {
@@ -1442,7 +1462,7 @@ export class Router {
   * @param options If options.absolute = true, then absolute url will be generated; otherwise, it will be relative url.
   * @returns {string} A string containing the generated URL fragment.
   */
-  generate(name: string, params?: any, options?: any = {}): string {
+  generate(name: string, params?: any, options?: any = {}, baseUrlOverride: string = null): string {
     let hasRoute = this._recognizer.hasRoute(name);
     if ((!this.isConfigured || !hasRoute) && this.parent) {
       return this.parent.generate(name, params);
@@ -1453,7 +1473,7 @@ export class Router {
     }
 
     let path = this._recognizer.generate(name, params);
-    let rootedPath = _createRootedPath(path, this.baseUrl, this.history._hasPushState, this.history.root);
+    let rootedPath = _createRootedPath(path, baseUrlOverride ? baseUrlOverride : this.baseUrl, this.history._hasPushState, this.history.root);
     if (options.absolute) {
       // Hamfisted workaround because history does not expose the origin without the root
       let origin = this.history.getAbsoluteRoot();
@@ -2127,6 +2147,9 @@ function loadRoute(routeLoader: RouteLoader, navigationInstruction: NavigationIn
 
           return _buildNavigationPlan(childInstruction)
             .then((childPlan) => {
+              if (childPlan instanceof Redirect) {
+                return Promise.reject(childPlan);
+              }
               childInstruction.plan = childPlan;
               viewPortInstruction.childNavigationInstruction = childInstruction;
 
