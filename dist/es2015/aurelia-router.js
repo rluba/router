@@ -768,7 +768,7 @@ export let Router = class Router {
 
   navigateToRoute(route, params, options) {
     let path = this.generate(route, params);
-    return this.navigate(path, options);
+    return this.history.navigate(path, options);
   }
 
   navigateBack() {

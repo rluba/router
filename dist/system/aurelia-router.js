@@ -1326,7 +1326,7 @@ System.register(['aurelia-logging', 'aurelia-route-recognizer', 'aurelia-depende
 
         Router.prototype.navigateToRoute = function navigateToRoute(route, params, options) {
           var path = this.generate(route, params);
-          return this.navigate(path, options);
+          return this.history.navigate(path, options);
         };
 
         Router.prototype.navigateBack = function navigateBack() {

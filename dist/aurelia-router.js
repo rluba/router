@@ -1431,7 +1431,7 @@ export class Router {
   */
   navigateToRoute(route: string, params?: any, options?: any): NavigationResult {
     let path = this.generate(route, params);
-    return this.navigate(path, options);
+    return this.history.navigate(path, options);
   }
 
   /**

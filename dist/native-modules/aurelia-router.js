@@ -850,7 +850,7 @@ export var Router = function () {
 
   Router.prototype.navigateToRoute = function navigateToRoute(route, params, options) {
     var path = this.generate(route, params);
-    return this.navigate(path, options);
+    return this.history.navigate(path, options);
   };
 
   Router.prototype.navigateBack = function navigateBack() {
