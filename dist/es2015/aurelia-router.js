@@ -639,6 +639,9 @@ function hasDifferentParameterValues(prev, next) {
   let prevParams = prev.params;
   let nextParams = next.params;
   let nextWildCardName = next.config.hasChildRouter ? next.getWildCardName() : null;
+  if (!nextWildCardName && prev.config.hasChildRouter) {
+    nextWildCardName = prev.getWildCardName();
+  }
 
   for (let key in nextParams) {
     if (key === nextWildCardName) {
