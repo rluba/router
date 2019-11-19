@@ -229,6 +229,9 @@ System.register(['aurelia-logging', 'aurelia-route-recognizer', 'aurelia-depende
     var prevParams = prev.params;
     var nextParams = next.params;
     var nextWildCardName = next.config.hasChildRouter ? next.getWildCardName() : null;
+    if (!nextWildCardName && prev.config.hasChildRouter) {
+      nextWildCardName = prev.getWildCardName();
+    }
 
     for (var _key2 in nextParams) {
       if (_key2 === nextWildCardName) {
